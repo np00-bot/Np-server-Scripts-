@@ -1,0 +1,157 @@
+--[================================================================]--
+--  Advanced Multi-Shape Procedural Wings LocalScript               --
+--  Place inside: StarterPlayer.StarterCharacterScripts             --
+--[================================================================]--
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local character = script.Parent
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Find Torso (supports R6 and R15)
+local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+if not torso then return end
+
+-- Configuration
+local TOTAL_PARTS = 100 -- Distributed across skeletal struts and multi-shape feathers
+local primaryColor = Color3.fromRGB(20, 20, 25) -- Dark metallic base structure
+local glowColor = Color3.fromRGB(0, 240, 255)    -- Bright neon energy color
+
+-- Create Wings Model
+local wingsModel = Instance.new("Model")
+wingsModel.Name = "AdvancedProceduralWings"
+wingsModel.Parent = character
+
+local function createWing(isRight)
+	local sideMultiplier = isRight and 1 or -1
+
+	-- Wing Base Attachment Part
+	local wingBase = Instance.new("Part")
+	wingBase.Size = Vector3.new(1.2, 1.2, 1.2)
+	wingBase.Shape = Enum.PartType.Block
+	wingBase.Material = Enum.Material.SmoothPlastic
+	wingBase.Color = primaryColor
+	wingBase.Transparency = 1 -- Invisible anchor point
+	wingBase.CanCollide = false
+	wingBase.Anchored = false
+	wingBase.Parent = wingsModel
+
+	-- Motor6D for smooth client-side animation control
+	local motor = Instance.new("Motor6D")
+	motor.Part0 = torso
+	motor.Part1 = wingBase
+	motor.C0 = CFrame.new(sideMultiplier * 1.3, 1.2, 0.9) * CFrame.Angles(math.rad(10), 0, sideMultiplier * math.rad(20))
+	motor.Parent = wingBase
+
+	-- 1. Build Structural Wing Bones (Cylinders for spars)
+	for b = 1, 4 do
+		local bone = Instance.new("Part")
+		bone.Shape = Enum.PartType.Cylinder
+		bone.Size = Vector3.new(6 + (b * 1.5), 0.6, 0.6)
+		bone.Material = Enum.Material.Metal
+		bone.Color = primaryColor
+		bone.CanCollide = false
+		bone.Anchored = false
+		bone.Parent = wingsModel
+
+		-- Orient cylinders outward like a skeletal wing frame
+		local angleOffset = math.rad(15 * b) * sideMultiplier
+		bone.CFrame = wingBase.CFrame * CFrame.new(sideMultiplier * (2 + b), b * 0.8, -0.2) * CFrame.Angles(0, 0, angleOffset + math.rad(45 * sideMultiplier))
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = wingBase
+		weld.Part1 = bone
+		weld.Parent = bone
+	end
+
+	-- 2. Build Layered Feathers using Wedges and Blocks (~90 parts)
+	local partsPerWing = math.floor((TOTAL_PARTS - 4) / 2)
+	
+	for i = 1, partsPerWing do
+		local feather
+		
+		-- Mix shapes: Use Wedges for sharp wingtips, Blocks for inner feathers, Cylinders for core shafts
+		if i % 3 == 0 then
+			feather = Instance.new("Part")
+			feather.Shape = Enum.PartType.Wedge
+			feather.Size = Vector3.new(0.4, 3.5 + (i * 0.08), 0.4)
+		elseif i % 3 == 1 then
+			feather = Instance.new("Part")
+			feather.Shape = Enum.PartType.Block
+			feather.Size = Vector3.new(0.6, 4 + (i * 0.06), 0.25)
+		else
+			feather = Instance.new("Part")
+			feather.Shape = Enum.PartType.Cylinder
+			feather.Size = Vector3.new(3.8 + (i * 0.07), 0.35, 0.35)
+		end
+
+		-- Alternate materials for detail contrast
+		if i % 2 == 0 then
+			feather.Material = Enum.Material.Neon
+			feather.Color = glowColor
+			
+			-- Add point lights on key glowing feathers
+			if i % 15 == 0 then
+				local light = Instance.new("PointLight")
+				light.Color = glowColor
+				light.Range = 10
+				light.Brightness = 2
+				light.Parent = feather
+			end
+		else
+			feather.Material = Enum.Material.Glass
+			feather.Color = glowColor
+			feather.Transparency = 0.2
+		end
+
+		feather.CanCollide = false
+		feather.Anchored = false
+		feather.Parent = wingsModel
+
+		-- Radial spread calculation for a massive ~5x avatar wingspan (~22 studs total width)
+		local progress = (i / partsPerWing)
+		local fanAngle = progress * math.rad(135) * sideMultiplier
+		local radius = 3.5 + (progress * 7)
+
+		local xPos = math.cos(fanAngle) * radius * sideMultiplier
+		local yPos = math.sin(fanAngle) * radius * 0.95
+		local zPos = math.sin(progress * math.pi) * -0.8 -- Gives wings a curved 3D cup shape
+
+		feather.CFrame = wingBase.CFrame * CFrame.new(xPos, yPos, zPos) * CFrame.Angles(math.rad(i * 4), 0, fanAngle + math.rad(15 * sideMultiplier))
+
+		-- Rigidly weld to wing base
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = wingBase
+		weld.Part1 = feather
+		weld.Parent = feather
+	end
+
+	return motor
+end
+
+-- Generate Left and Right Wings
+local leftMotor = createWing(false)
+local rightMotor = createWing(true)
+
+-- Animation & Flapping Loop
+local startTime = tick()
+RunService.RenderStepped:Connect(function()
+	if not character or not humanoidRootPart or not humanoid then return end
+
+	local speed = humanoidRootPart.AssemblyLinearVelocity.Magnitude
+	local isMovingFast = speed > 22 -- Trigger threshold for flight animation
+
+	local timeElapsed = tick() - startTime
+
+	-- Dynamic flapping parameters based on movement state
+	local frequency = isMovingFast and 20 or 3.5
+	local amplitude = isMovingFast and 0.55 or 0.1
+	local flapMotion = math.sin(timeElapsed * frequency) * amplitude
+
+	-- Apply organic rotation adjustments via Motor6D
+	leftMotor.C0 = CFrame.new(-1.3, 1.2, 0.9) * CFrame.Angles(math.rad(10), 0, -math.rad(20) - flapMotion)
+	rightMotor.C0 = CFrame.new(1.3, 1.2, 0.9) * CFrame.Angles(math.rad(10), 0, math.rad(20) + flapMotion)
+end)
